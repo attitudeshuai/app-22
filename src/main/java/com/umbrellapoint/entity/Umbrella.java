@@ -32,6 +32,6 @@ public class Umbrella {
     private LocalDateTime createdAt;
 
     public enum UmbrellaStatus {
-        Available, Borrowed, Lost, Damaged
+        Available, Reserved, Borrowed, Lost, Damaged
     }
 }

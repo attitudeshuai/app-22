@@ -34,17 +34,20 @@ public class QrCodeService {
     private final BorrowRecordRepository borrowRecordRepository;
     private final UserCreditRepository userCreditRepository;
     private final AuthService authService;
+    private final ReservationService reservationService;
 
     public QrCodeService(StationRepository stationRepository,
                          UmbrellaRepository umbrellaRepository,
                          BorrowRecordRepository borrowRecordRepository,
                          UserCreditRepository userCreditRepository,
-                         AuthService authService) {
+                         AuthService authService,
+                         ReservationService reservationService) {
         this.stationRepository = stationRepository;
         this.umbrellaRepository = umbrellaRepository;
         this.borrowRecordRepository = borrowRecordRepository;
         this.userCreditRepository = userCreditRepository;
         this.authService = authService;
+        this.reservationService = reservationService;
     }
 
     @Transactional
@@ -65,13 +68,6 @@ public class QrCodeService {
             throw new BusinessException("该借还点已停用，暂时无法借伞");
         }
 
-        List<Umbrella> availableUmbrellas = umbrellaRepository.findByStationIdAndStatus(
-                station.getId(), Umbrella.UmbrellaStatus.Available);
-        if (availableUmbrellas.isEmpty()) {
-            logger.warn("扫码借伞失败: 站点无可用雨伞, stationId={}, userId={}", station.getId(), currentUserId);
-            throw new BusinessException("该借还点暂无可用雨伞");
-        }
-
         UserCredit credit = userCreditRepository.findByUserId(currentUserId).orElse(null);
         if (credit == null || credit.getScore() < MIN_CREDIT_SCORE) {
             int score = credit != null ? credit.getScore() : 0;
@@ -86,13 +82,58 @@ public class QrCodeService {
             throw new BusinessException("您有未归还的雨伞，请先归还后再借");
         }
 
+        com.umbrellapoint.entity.Reservation activeReservation = reservationService
+                .findActiveReservationByUserAndStation(currentUserId, station.getId());
+
+        if (activeReservation != null) {
+            return borrowWithReservation(activeReservation, station);
+        }
+
+        return borrowWithoutReservation(station, currentUserId);
+    }
+
+    private ScanBorrowResponse borrowWithReservation(com.umbrellapoint.entity.Reservation reservation, Station station) {
+        BorrowRecord borrowRecord = reservationService.confirmPickup(reservation.getId());
+
+        Umbrella umbrella = umbrellaRepository.findById(borrowRecord.getUmbrellaId()).orElse(null);
+
+        long availableCount = umbrellaRepository.countByStationIdAndStatus(
+                station.getId(), Umbrella.UmbrellaStatus.Available);
+        boolean restockAlert = checkAndNotifyRestock(station, (int) availableCount);
+
+        logger.info("预约扫码借伞成功: userId={}, umbrellaId={}, stationId={}, recordId={}, reservationId={}",
+                reservation.getUserId(), borrowRecord.getUmbrellaId(), station.getId(),
+                borrowRecord.getId(), reservation.getId());
+
+        return new ScanBorrowResponse(
+                borrowRecord.getId(),
+                borrowRecord.getUmbrellaId(),
+                umbrella != null ? umbrella.getCode() : null,
+                station.getId(),
+                station.getName(),
+                borrowRecord.getBorrowTime(),
+                borrowRecord.getDeposit(),
+                borrowRecord.getStatus(),
+                (int) availableCount,
+                restockAlert
+        );
+    }
+
+    private ScanBorrowResponse borrowWithoutReservation(Station station, Long userId) {
+        List<Umbrella> availableUmbrellas = umbrellaRepository.findByStationIdAndStatus(
+                station.getId(), Umbrella.UmbrellaStatus.Available);
+        if (availableUmbrellas.isEmpty()) {
+            logger.warn("扫码借伞失败: 站点无可用雨伞, stationId={}, userId={}", station.getId(), userId);
+            throw new BusinessException("该借还点暂无可用雨伞，您可以先进行预约排队");
+        }
+
         Umbrella umbrella = availableUmbrellas.get(0);
         umbrella.setStatus(Umbrella.UmbrellaStatus.Borrowed);
         umbrellaRepository.save(umbrella);
 
         BorrowRecord record = new BorrowRecord();
         record.setUmbrellaId(umbrella.getId());
-        record.setUserId(currentUserId);
+        record.setUserId(userId);
         record.setBorrowStationId(station.getId());
         record.setBorrowTime(LocalDateTime.now());
         record.setStatus(BorrowRecord.BorrowStatus.Ongoing);
@@ -104,7 +145,7 @@ public class QrCodeService {
         boolean restockAlert = checkAndNotifyRestock(station, (int) availableCount);
 
         logger.info("扫码借伞成功: userId={}, umbrellaId={}, stationId={}, recordId={}",
-                currentUserId, umbrella.getId(), station.getId(), record.getId());
+                userId, umbrella.getId(), station.getId(), record.getId());
 
         return new ScanBorrowResponse(
                 record.getId(),
