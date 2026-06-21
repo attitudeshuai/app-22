@@ -33,6 +33,12 @@ public class Station {
     @Column(nullable = false)
     private Integer capacity;
 
+    @Column(name = "qr_code", unique = true, length = 100)
+    private String qrCode;
+
+    @Column(name = "safety_threshold")
+    private Integer safetyThreshold = 5;
+
     @Column(name = "is_active")
     private Boolean isActive = true;
 

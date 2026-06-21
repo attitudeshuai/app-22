@@ -54,6 +54,8 @@ public class StationService {
         station.setLatitude(request.getLatitude());
         station.setLongitude(request.getLongitude());
         station.setCapacity(request.getCapacity());
+        station.setQrCode(request.getQrCode());
+        station.setSafetyThreshold(request.getSafetyThreshold() != null ? request.getSafetyThreshold() : 5);
         station.setIsActive(request.getIsActive() != null ? request.getIsActive() : true);
         station = stationRepository.save(station);
         logger.info("借还点创建成功: {}", station.getName());
@@ -71,6 +73,8 @@ public class StationService {
         if (request.getLatitude() != null) station.setLatitude(request.getLatitude());
         if (request.getLongitude() != null) station.setLongitude(request.getLongitude());
         if (request.getCapacity() != null) station.setCapacity(request.getCapacity());
+        if (request.getQrCode() != null) station.setQrCode(request.getQrCode());
+        if (request.getSafetyThreshold() != null) station.setSafetyThreshold(request.getSafetyThreshold());
         if (request.getIsActive() != null) station.setIsActive(request.getIsActive());
 
         station = stationRepository.save(station);
@@ -96,6 +100,8 @@ public class StationService {
                 station.getLatitude(),
                 station.getLongitude(),
                 station.getCapacity(),
+                station.getQrCode(),
+                station.getSafetyThreshold(),
                 station.getIsActive(),
                 station.getCreatedAt()
         );

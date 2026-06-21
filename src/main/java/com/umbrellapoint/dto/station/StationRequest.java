@@ -25,5 +25,9 @@ public class StationRequest {
     @Positive(message = "容量必须大于0")
     private Integer capacity;
 
+    private String qrCode;
+
+    private Integer safetyThreshold;
+
     private Boolean isActive = true;
 }

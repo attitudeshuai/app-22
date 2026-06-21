@@ -19,4 +19,5 @@ public interface UmbrellaRepository extends JpaRepository<Umbrella, Long> {
     List<Umbrella> findByStationIdAndStatus(Long stationId, Umbrella.UmbrellaStatus status);
     long countByStatus(Umbrella.UmbrellaStatus status);
     long countByStationId(Long stationId);
+    long countByStationIdAndStatus(Long stationId, Umbrella.UmbrellaStatus status);
 }

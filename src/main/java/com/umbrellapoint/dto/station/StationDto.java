@@ -18,6 +18,8 @@ public class StationDto {
     private BigDecimal latitude;
     private BigDecimal longitude;
     private Integer capacity;
+    private String qrCode;
+    private Integer safetyThreshold;
     private Boolean isActive;
     private LocalDateTime createdAt;
 }
