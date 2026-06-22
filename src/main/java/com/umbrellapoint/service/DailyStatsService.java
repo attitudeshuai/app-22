@@ -133,6 +133,10 @@ public class DailyStatsService {
         Map<Long, Long> overdueCountMap = getOverdueCountMap(startTime, endTime);
         Map<Long, Double> avgDurationMap = getAvgDurationMap(startTime, endTime);
 
+        Map<Long, Long> creditDeductionMap = getCreditDeductionMap(startTime, endTime);
+        long unlinkedDeductionCount = creditChangeLogRepository.countByChangeTypeAndBorrowRecordIdIsNullAndCreatedAtBetween(
+                CreditChangeLog.ChangeType.OVERDUE_PENALTY, startTime, endTime);
+
         long totalNewUsers = userRepository.countByCreatedAtBetween(startTime, endTime);
 
         for (Station station : stations) {
@@ -145,11 +149,13 @@ public class DailyStatsService {
             long returnCount = returnCountMap.getOrDefault(station.getId(), 0L);
             long overdueCount = overdueCountMap.getOrDefault(station.getId(), 0L);
             Double avgDuration = avgDurationMap.get(station.getId());
+            long creditDeductionCount = creditDeductionMap.getOrDefault(station.getId(), 0L);
 
             stats.setBorrowCount((int) borrowCount);
             stats.setReturnCount((int) returnCount);
             stats.setTotalBorrowReturn((int) (borrowCount + returnCount));
             stats.setOverdueCount((int) overdueCount);
+            stats.setCreditDeductionCount((int) creditDeductionCount);
 
             BigDecimal overdueRate = borrowCount > 0
                     ? BigDecimal.valueOf(overdueCount)
@@ -172,20 +178,41 @@ public class DailyStatsService {
                     station.getId(), startTime, endTime);
             stats.setCrossRegionCount((int) crossRegionCount);
 
-            long creditDeductionCount = creditChangeLogRepository.countDeductionsByStationIdAndTimeRange(
-                    CreditChangeLog.ChangeType.OVERDUE_PENALTY, station.getId(), startTime, endTime);
-            stats.setCreditDeductionCount((int) creditDeductionCount);
-
             statsList.add(stats);
         }
 
-        if (!statsList.isEmpty() && totalNewUsers > 0) {
-            StationDailyStats firstStation = statsList.get(0);
-            firstStation.setNewUsers((int) totalNewUsers);
-        }
+        StationDailyStats globalSummary = new StationDailyStats();
+        globalSummary.setStatDate(date);
+        globalSummary.setStationId(0L);
+        globalSummary.setStationName("[全站汇总]");
+        globalSummary.setNewUsers((int) totalNewUsers);
+        globalSummary.setCreditDeductionCount((int) unlinkedDeductionCount);
+        globalSummary.setBorrowCount(0);
+        globalSummary.setReturnCount(0);
+        globalSummary.setTotalBorrowReturn(0);
+        globalSummary.setOverdueCount(0);
+        globalSummary.setOverdueRate(BigDecimal.ZERO);
+        globalSummary.setAvgBorrowDurationMinutes(BigDecimal.ZERO);
+        globalSummary.setAvailableUmbrellas(0);
+        globalSummary.setTotalUmbrellas(0);
+        globalSummary.setCrossRegionCount(0);
+        statsList.add(globalSummary);
 
         stationDailyStatsRepository.saveAll(statsList);
-        logger.info("成功生成 {} 的站点日报，共 {} 个站点，新增用户 {} 人", date, statsList.size(), totalNewUsers);
+        logger.info("成功生成 {} 的站点日报，共 {} 个站点+1个全站汇总，新增用户 {} 人，无关联扣减 {} 次",
+                date, stations.size(), totalNewUsers, unlinkedDeductionCount);
+    }
+
+    private Map<Long, Long> getCreditDeductionMap(LocalDateTime startTime, LocalDateTime endTime) {
+        List<Object[]> results = creditChangeLogRepository.countDeductionsGroupByStationAndTimeRange(
+                CreditChangeLog.ChangeType.OVERDUE_PENALTY, startTime, endTime);
+        Map<Long, Long> map = new HashMap<>();
+        for (Object[] row : results) {
+            Long stationId = (Long) row[0];
+            Long count = ((Number) row[1]).longValue();
+            map.put(stationId, count);
+        }
+        return map;
     }
 
     private Map<Long, Long> getBorrowCountMap(LocalDateTime startTime, LocalDateTime endTime) {
@@ -237,42 +264,68 @@ public class DailyStatsService {
     }
 
     public DailyReportDto getDailyReport(LocalDate date, List<Long> stationIds) {
-        List<StationDailyStats> statsList = stationDailyStatsRepository
-                .findByDateRangeAndStationIds(date, date, stationIds);
+        List<StationDailyStats> statsList = loadDailyStatsWithGlobal(date, stationIds);
 
         if (statsList.isEmpty()) {
             generateDailyReport(date);
-            statsList = stationDailyStatsRepository
-                    .findByDateRangeAndStationIds(date, date, stationIds);
+            statsList = loadDailyStatsWithGlobal(date, stationIds);
         }
 
         return buildDailyReportDto(date, statsList);
     }
 
+    private List<StationDailyStats> loadDailyStatsWithGlobal(LocalDate date, List<Long> stationIds) {
+        List<StationDailyStats> result = new ArrayList<>();
+        List<StationDailyStats> stationStats;
+        if (stationIds == null || stationIds.isEmpty()) {
+            stationStats = stationDailyStatsRepository.findByStatDate(date);
+        } else {
+            stationStats = stationDailyStatsRepository.findByDateRangeAndStationIds(date, date, stationIds);
+        }
+        result.addAll(stationStats);
+
+        boolean hasGlobal = result.stream()
+                .anyMatch(s -> s.getStationId() != null && s.getStationId() == 0L);
+        if (!hasGlobal) {
+            stationDailyStatsRepository.findByStatDateAndStationId(date, 0L)
+                    .ifPresent(result::add);
+        }
+        return result;
+    }
+
     private DailyReportDto buildDailyReportDto(LocalDate date, List<StationDailyStats> statsList) {
         DailyReportDto report = new DailyReportDto();
         report.setReportDate(date);
-        report.setTotalStations(statsList.size());
+
+        StationDailyStats globalSummary = null;
+        List<StationDailyStats> realStationStats = new ArrayList<>();
+        for (StationDailyStats stats : statsList) {
+            if (stats.getStationId() != null && stats.getStationId() == 0L) {
+                globalSummary = stats;
+            } else {
+                realStationStats.add(stats);
+            }
+        }
+
+        report.setTotalStations(realStationStats.size());
 
         int totalBorrows = 0;
         int totalReturns = 0;
         int totalOverdue = 0;
         int totalAvailable = 0;
         int totalUmbrellas = 0;
-        int totalNewUsers = 0;
-        int totalCreditDeductions = 0;
+        int totalStationDeductions = 0;
         BigDecimal totalDuration = BigDecimal.ZERO;
         int durationCount = 0;
 
         List<StationDailyStatsDto> stationDtos = new ArrayList<>();
-        for (StationDailyStats stats : statsList) {
+        for (StationDailyStats stats : realStationStats) {
             totalBorrows += stats.getBorrowCount();
             totalReturns += stats.getReturnCount();
             totalOverdue += stats.getOverdueCount();
             totalAvailable += stats.getAvailableUmbrellas();
             totalUmbrellas += stats.getTotalUmbrellas();
-            totalNewUsers += stats.getNewUsers() != null ? stats.getNewUsers() : 0;
-            totalCreditDeductions += stats.getCreditDeductionCount() != null ? stats.getCreditDeductionCount() : 0;
+            totalStationDeductions += stats.getCreditDeductionCount() != null ? stats.getCreditDeductionCount() : 0;
 
             if (stats.getAvgBorrowDurationMinutes() != null
                     && stats.getAvgBorrowDurationMinutes().compareTo(BigDecimal.ZERO) > 0
@@ -285,6 +338,13 @@ public class DailyStatsService {
             stationDtos.add(convertToDto(stats));
         }
 
+        int totalNewUsers = 0;
+        int unlinkedDeductions = 0;
+        if (globalSummary != null) {
+            totalNewUsers = globalSummary.getNewUsers() != null ? globalSummary.getNewUsers() : 0;
+            unlinkedDeductions = globalSummary.getCreditDeductionCount() != null ? globalSummary.getCreditDeductionCount() : 0;
+        }
+
         report.setTotalBorrows(totalBorrows);
         report.setTotalReturns(totalReturns);
         report.setTotalBorrowReturn(totalBorrows + totalReturns);
@@ -292,7 +352,7 @@ public class DailyStatsService {
         report.setTotalAvailableUmbrellas(totalAvailable);
         report.setTotalUmbrellas(totalUmbrellas);
         report.setTotalNewUsers(totalNewUsers);
-        report.setTotalCreditDeductions(totalCreditDeductions);
+        report.setTotalCreditDeductions(totalStationDeductions + unlinkedDeductions);
 
         BigDecimal overallOverdueRate = totalBorrows > 0
                 ? BigDecimal.valueOf(totalOverdue)
@@ -308,8 +368,8 @@ public class DailyStatsService {
 
         report.setStationStats(stationDtos);
 
-        report.setDayOverDay(calculateComparison(date, statsList, 1));
-        report.setWeekOverWeek(calculateComparison(date, statsList, 7));
+        report.setDayOverDay(calculateComparison(date, realStationStats, 1));
+        report.setWeekOverWeek(calculateComparison(date, realStationStats, 7));
 
         return report;
     }
@@ -440,6 +500,7 @@ public class DailyStatsService {
         List<StationDailyStats> statsList = stationDailyStatsRepository
                 .findByDateRangeAndStationIds(startDate, endDate, stationIds);
         return statsList.stream()
+                .filter(s -> s.getStationId() == null || s.getStationId() != 0L)
                 .map(this::convertToDto)
                 .collect(Collectors.toList());
     }

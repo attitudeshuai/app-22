@@ -41,4 +41,12 @@ public interface CreditChangeLogRepository extends JpaRepository<CreditChangeLog
             @Param("stationId") Long stationId,
             @Param("startTime") LocalDateTime startTime,
             @Param("endTime") LocalDateTime endTime);
+
+    @Query("SELECT b.borrowStationId, COUNT(c) FROM CreditChangeLog c JOIN BorrowRecord b ON c.borrowRecordId = b.id WHERE c.changeType = :changeType AND c.createdAt BETWEEN :startTime AND :endTime GROUP BY b.borrowStationId")
+    List<Object[]> countDeductionsGroupByStationAndTimeRange(
+            @Param("changeType") CreditChangeLog.ChangeType changeType,
+            @Param("startTime") LocalDateTime startTime,
+            @Param("endTime") LocalDateTime endTime);
+
+    long countByChangeTypeAndBorrowRecordIdIsNullAndCreatedAtBetween(CreditChangeLog.ChangeType changeType, LocalDateTime startTime, LocalDateTime endTime);
 }
