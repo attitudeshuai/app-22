@@ -2,10 +2,12 @@ package com.umbrellapoint.service;
 
 import com.umbrellapoint.dto.stats.*;
 import com.umbrellapoint.entity.BorrowRecord;
+import com.umbrellapoint.entity.CreditChangeLog;
 import com.umbrellapoint.entity.Station;
 import com.umbrellapoint.entity.StationDailyStats;
 import com.umbrellapoint.entity.Umbrella;
 import com.umbrellapoint.repository.BorrowRecordRepository;
+import com.umbrellapoint.repository.CreditChangeLogRepository;
 import com.umbrellapoint.repository.StationDailyStatsRepository;
 import com.umbrellapoint.repository.StationRepository;
 import com.umbrellapoint.repository.UmbrellaRepository;
@@ -37,17 +39,20 @@ public class DailyStatsService {
     private final BorrowRecordRepository borrowRecordRepository;
     private final StationDailyStatsRepository stationDailyStatsRepository;
     private final UserRepository userRepository;
+    private final CreditChangeLogRepository creditChangeLogRepository;
 
     public DailyStatsService(StationRepository stationRepository,
                              UmbrellaRepository umbrellaRepository,
                              BorrowRecordRepository borrowRecordRepository,
                              StationDailyStatsRepository stationDailyStatsRepository,
-                             UserRepository userRepository) {
+                             UserRepository userRepository,
+                             CreditChangeLogRepository creditChangeLogRepository) {
         this.stationRepository = stationRepository;
         this.umbrellaRepository = umbrellaRepository;
         this.borrowRecordRepository = borrowRecordRepository;
         this.stationDailyStatsRepository = stationDailyStatsRepository;
         this.userRepository = userRepository;
+        this.creditChangeLogRepository = creditChangeLogRepository;
     }
 
     public List<StationStatsDto> getStationStats(List<Long> stationIds) {
@@ -128,6 +133,8 @@ public class DailyStatsService {
         Map<Long, Long> overdueCountMap = getOverdueCountMap(startTime, endTime);
         Map<Long, Double> avgDurationMap = getAvgDurationMap(startTime, endTime);
 
+        long totalNewUsers = userRepository.countByCreatedAtBetween(startTime, endTime);
+
         for (Station station : stations) {
             StationDailyStats stats = new StationDailyStats();
             stats.setStatDate(date);
@@ -165,14 +172,20 @@ public class DailyStatsService {
                     station.getId(), startTime, endTime);
             stats.setCrossRegionCount((int) crossRegionCount);
 
-            stats.setNewUsers(0);
-            stats.setCreditDeductionCount(0);
+            long creditDeductionCount = creditChangeLogRepository.countDeductionsByStationIdAndTimeRange(
+                    CreditChangeLog.ChangeType.OVERDUE_PENALTY, station.getId(), startTime, endTime);
+            stats.setCreditDeductionCount((int) creditDeductionCount);
 
             statsList.add(stats);
         }
 
+        if (!statsList.isEmpty() && totalNewUsers > 0) {
+            StationDailyStats firstStation = statsList.get(0);
+            firstStation.setNewUsers((int) totalNewUsers);
+        }
+
         stationDailyStatsRepository.saveAll(statsList);
-        logger.info("成功生成 {} 的站点日报，共 {} 个站点", date, statsList.size());
+        logger.info("成功生成 {} 的站点日报，共 {} 个站点，新增用户 {} 人", date, statsList.size(), totalNewUsers);
     }
 
     private Map<Long, Long> getBorrowCountMap(LocalDateTime startTime, LocalDateTime endTime) {
@@ -246,6 +259,8 @@ public class DailyStatsService {
         int totalOverdue = 0;
         int totalAvailable = 0;
         int totalUmbrellas = 0;
+        int totalNewUsers = 0;
+        int totalCreditDeductions = 0;
         BigDecimal totalDuration = BigDecimal.ZERO;
         int durationCount = 0;
 
@@ -256,6 +271,8 @@ public class DailyStatsService {
             totalOverdue += stats.getOverdueCount();
             totalAvailable += stats.getAvailableUmbrellas();
             totalUmbrellas += stats.getTotalUmbrellas();
+            totalNewUsers += stats.getNewUsers() != null ? stats.getNewUsers() : 0;
+            totalCreditDeductions += stats.getCreditDeductionCount() != null ? stats.getCreditDeductionCount() : 0;
 
             if (stats.getAvgBorrowDurationMinutes() != null
                     && stats.getAvgBorrowDurationMinutes().compareTo(BigDecimal.ZERO) > 0
@@ -274,6 +291,8 @@ public class DailyStatsService {
         report.setTotalOverdue(totalOverdue);
         report.setTotalAvailableUmbrellas(totalAvailable);
         report.setTotalUmbrellas(totalUmbrellas);
+        report.setTotalNewUsers(totalNewUsers);
+        report.setTotalCreditDeductions(totalCreditDeductions);
 
         BigDecimal overallOverdueRate = totalBorrows > 0
                 ? BigDecimal.valueOf(totalOverdue)
@@ -307,6 +326,17 @@ public class DailyStatsService {
                 .findByDateRangeAndStationIds(comparisonDate, comparisonDate, stationIds);
 
         ComparisonStatsDto dto = new ComparisonStatsDto();
+        dto.setComparisonType(daysAgo == 1 ? "day_over_day" : "week_over_week");
+        dto.setComparisonPeriod(comparisonDate.toString());
+
+        if (comparisonStats.isEmpty()) {
+            dto.setHasData(false);
+            dto.setRemark("对比日期 " + comparisonDate + " 无历史数据，跳过对比");
+            return dto;
+        }
+
+        dto.setHasData(true);
+        dto.setRemark("对比正常");
 
         int currentTotal = currentStats.stream()
                 .mapToInt(StationDailyStats::getTotalBorrowReturn).sum();
@@ -345,9 +375,6 @@ public class DailyStatsService {
                 .mapToInt(StationDailyStats::getAvailableUmbrellas).sum();
         dto.setAvailableUmbrellasChange(BigDecimal.valueOf(currentAvailable - comparisonAvailable));
         dto.setAvailableUmbrellasChangeRate(calculateChangeRate(currentAvailable, comparisonAvailable));
-
-        dto.setComparisonType(daysAgo == 1 ? "day_over_day" : "week_over_week");
-        dto.setComparisonPeriod(comparisonDate.toString());
 
         return dto;
     }
@@ -428,6 +455,8 @@ public class DailyStatsService {
 
             writer.println("汇总数据");
             writer.println("站点总数," + report.getTotalStations());
+            writer.println("新增用户数," + report.getTotalNewUsers());
+            writer.println("信用扣减次数," + report.getTotalCreditDeductions());
             writer.println("借还总量," + report.getTotalBorrowReturn());
             writer.println("借出数量," + report.getTotalBorrows());
             writer.println("归还数量," + report.getTotalReturns());
@@ -439,35 +468,43 @@ public class DailyStatsService {
             writer.println();
 
             if (report.getDayOverDay() != null) {
-                writer.println("环比(较昨日)");
-                writer.println("指标,当前值,变化量,变化率(%)");
-                writer.println("借还总量," + report.getTotalBorrowReturn() + ","
-                        + report.getDayOverDay().getTotalBorrowReturnChange() + ","
-                        + report.getDayOverDay().getTotalBorrowReturnChangeRate());
-                writer.println("逾期数量," + report.getTotalOverdue() + ","
-                        + report.getDayOverDay().getOverdueCountChange() + ","
-                        + report.getDayOverDay().getOverdueCountChangeRate());
-                writer.println("逾期率(%)," + report.getOverallOverdueRate() + ","
-                        + report.getDayOverDay().getOverdueRateChange() + ",-");
+                writer.println("环比(较昨日) - " + report.getDayOverDay().getComparisonPeriod());
+                if (Boolean.TRUE.equals(report.getDayOverDay().getHasData())) {
+                    writer.println("指标,当前值,变化量,变化率(%)");
+                    writer.println("借还总量," + report.getTotalBorrowReturn() + ","
+                            + report.getDayOverDay().getTotalBorrowReturnChange() + ","
+                            + report.getDayOverDay().getTotalBorrowReturnChangeRate());
+                    writer.println("逾期数量," + report.getTotalOverdue() + ","
+                            + report.getDayOverDay().getOverdueCountChange() + ","
+                            + report.getDayOverDay().getOverdueCountChangeRate());
+                    writer.println("逾期率(%)," + report.getOverallOverdueRate() + ","
+                            + report.getDayOverDay().getOverdueRateChange() + ",-");
+                } else {
+                    writer.println("状态," + report.getDayOverDay().getRemark());
+                }
                 writer.println();
             }
 
             if (report.getWeekOverWeek() != null) {
-                writer.println("同比(较上周)");
-                writer.println("指标,当前值,变化量,变化率(%)");
-                writer.println("借还总量," + report.getTotalBorrowReturn() + ","
-                        + report.getWeekOverWeek().getTotalBorrowReturnChange() + ","
-                        + report.getWeekOverWeek().getTotalBorrowReturnChangeRate());
-                writer.println("逾期数量," + report.getTotalOverdue() + ","
-                        + report.getWeekOverWeek().getOverdueCountChange() + ","
-                        + report.getWeekOverWeek().getOverdueCountChangeRate());
-                writer.println("逾期率(%)," + report.getOverallOverdueRate() + ","
-                        + report.getWeekOverWeek().getOverdueRateChange() + ",-");
+                writer.println("同比(较上周) - " + report.getWeekOverWeek().getComparisonPeriod());
+                if (Boolean.TRUE.equals(report.getWeekOverWeek().getHasData())) {
+                    writer.println("指标,当前值,变化量,变化率(%)");
+                    writer.println("借还总量," + report.getTotalBorrowReturn() + ","
+                            + report.getWeekOverWeek().getTotalBorrowReturnChange() + ","
+                            + report.getWeekOverWeek().getTotalBorrowReturnChangeRate());
+                    writer.println("逾期数量," + report.getTotalOverdue() + ","
+                            + report.getWeekOverWeek().getOverdueCountChange() + ","
+                            + report.getWeekOverWeek().getOverdueCountChangeRate());
+                    writer.println("逾期率(%)," + report.getOverallOverdueRate() + ","
+                            + report.getWeekOverWeek().getOverdueRateChange() + ",-");
+                } else {
+                    writer.println("状态," + report.getWeekOverWeek().getRemark());
+                }
                 writer.println();
             }
 
             writer.println("站点明细");
-            writer.println("站点ID,站点名称,借出数量,归还数量,借还总量,逾期数量,逾期率(%),平均借用时长(分钟),可用雨伞,雨伞总数,跨区域借还数");
+            writer.println("站点ID,站点名称,借出数量,归还数量,借还总量,逾期数量,逾期率(%),平均借用时长(分钟),可用雨伞,雨伞总数,跨区域借还数,信用扣减次数");
 
             for (StationDailyStatsDto stat : report.getStationStats()) {
                 writer.println(stat.getStationId() + ","
@@ -480,7 +517,8 @@ public class DailyStatsService {
                         + stat.getAvgBorrowDurationMinutes() + ","
                         + stat.getAvailableUmbrellas() + ","
                         + stat.getTotalUmbrellas() + ","
-                        + stat.getCrossRegionCount());
+                        + stat.getCrossRegionCount() + ","
+                        + stat.getCreditDeductionCount());
             }
 
             writer.flush();
@@ -500,7 +538,7 @@ public class DailyStatsService {
             writer.println('\ufeff' + "站点日报明细 - " + startDate + " 至 " + endDate);
             writer.println();
 
-            writer.println("统计日期,站点ID,站点名称,借出数量,归还数量,借还总量,逾期数量,逾期率(%),平均借用时长(分钟),可用雨伞,雨伞总数,跨区域借还数");
+            writer.println("统计日期,站点ID,站点名称,借出数量,归还数量,借还总量,逾期数量,逾期率(%),平均借用时长(分钟),可用雨伞,雨伞总数,跨区域借还数,信用扣减次数");
 
             DateTimeFormatter dateFormatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
             for (StationDailyStatsDto stat : statsList) {
@@ -515,7 +553,8 @@ public class DailyStatsService {
                         + stat.getAvgBorrowDurationMinutes() + ","
                         + stat.getAvailableUmbrellas() + ","
                         + stat.getTotalUmbrellas() + ","
-                        + stat.getCrossRegionCount());
+                        + stat.getCrossRegionCount() + ","
+                        + stat.getCreditDeductionCount());
             }
 
             writer.flush();

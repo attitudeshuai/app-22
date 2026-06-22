@@ -22,6 +22,8 @@ public class DailyReportDto {
     private BigDecimal overallAvgDurationMinutes;
     private Integer totalAvailableUmbrellas;
     private Integer totalUmbrellas;
+    private Integer totalNewUsers;
+    private Integer totalCreditDeductions;
     private ComparisonStatsDto dayOverDay;
     private ComparisonStatsDto weekOverWeek;
     private List<StationDailyStatsDto> stationStats;

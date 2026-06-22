@@ -10,6 +10,8 @@ import java.math.BigDecimal;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ComparisonStatsDto {
+    private Boolean hasData;
+    private String remark;
     private BigDecimal totalBorrowReturnChange;
     private BigDecimal totalBorrowReturnChangeRate;
     private BigDecimal overdueCountChange;
