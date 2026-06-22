@@ -47,27 +47,32 @@ public class OverdueCheckScheduler {
         int gracePeriodHours = creditConfigService.getGracePeriodHours();
         LocalDateTime overdueThreshold = LocalDateTime.now().minusHours(gracePeriodHours);
 
-        List<BorrowRecord> ongoingRecords = borrowRecordRepository
-                .findByStatusAndAppealStatusNotAndBorrowTimeBefore(
-                        BorrowRecord.BorrowStatus.Ongoing,
+        List<BorrowRecord> overdueRecords = borrowRecordRepository
+                .findByStatusInAndAppealStatusNotAndBorrowTimeBefore(
+                        java.util.Arrays.asList(
+                                BorrowRecord.BorrowStatus.Ongoing,
+                                BorrowRecord.BorrowStatus.Overdue
+                        ),
                         BorrowRecord.AppealStatus.Pending,
                         overdueThreshold);
 
-        logger.info("找到 {} 条可能逾期的记录（已排除申诉待审核）", ongoingRecords.size());
+        logger.info("找到 {} 条逾期或即将逾期的记录（已排除申诉待审核）", overdueRecords.size());
 
-        int overdueCount = 0;
+        int newOverdueCount = 0;
         int penaltyCount = 0;
         int totalDeduction = 0;
+        int skippedPenaltyCount = 0;
 
-        for (BorrowRecord record : ongoingRecords) {
+        for (BorrowRecord record : overdueRecords) {
             if (record.getStatus() != BorrowRecord.BorrowStatus.Overdue) {
                 record.setStatus(BorrowRecord.BorrowStatus.Overdue);
                 borrowRecordRepository.save(record);
-                overdueCount++;
-                logger.info("记录已标记为逾期: borrowRecordId={}, userId={}", record.getId(), record.getUserId());
+                newOverdueCount++;
+                logger.info("新记录标记为逾期: borrowRecordId={}, userId={}", record.getId(), record.getUserId());
             }
 
             if (userCreditService.hasPenaltyToday(record.getUserId(), record.getId())) {
+                skippedPenaltyCount++;
                 logger.debug("今日已扣减，跳过: borrowRecordId={}", record.getId());
                 continue;
             }
@@ -83,8 +88,8 @@ public class OverdueCheckScheduler {
             }
         }
 
-        logger.info("逾期检查完成，新标记逾期 {} 条，执行扣减 {} 条，累计扣减 {} 分",
-                overdueCount, penaltyCount, totalDeduction);
+        logger.info("逾期检查完成，新标记逾期 {} 条，今日执行扣减 {} 条，跳过重复扣减 {} 条，累计扣减 {} 分",
+                newOverdueCount, penaltyCount, skippedPenaltyCount, totalDeduction);
     }
 
     private void sendOverdueNotification(BorrowRecord record, int deduction) {

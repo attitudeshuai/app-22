@@ -30,6 +30,12 @@ public interface BorrowRecordRepository extends JpaRepository<BorrowRecord, Long
             BorrowRecord.AppealStatus appealStatus,
             LocalDateTime thresholdTime);
 
+    @Query("SELECT b FROM BorrowRecord b WHERE b.status IN :statuses AND b.appealStatus <> :appealStatus AND b.borrowTime < :thresholdTime")
+    List<BorrowRecord> findByStatusInAndAppealStatusNotAndBorrowTimeBefore(
+            List<BorrowRecord.BorrowStatus> statuses,
+            BorrowRecord.AppealStatus appealStatus,
+            LocalDateTime thresholdTime);
+
     List<BorrowRecord> findByAppealStatus(BorrowRecord.AppealStatus appealStatus);
 
     Page<BorrowRecord> findByAppealStatus(BorrowRecord.AppealStatus appealStatus, Pageable pageable);
