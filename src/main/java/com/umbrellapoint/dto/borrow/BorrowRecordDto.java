@@ -21,5 +21,9 @@ public class BorrowRecordDto {
     private LocalDateTime returnTime;
     private BorrowRecord.BorrowStatus status;
     private BigDecimal deposit;
+    private Long crossRegionFeeId;
+    private Boolean isCrossRegion;
+    private BorrowRecord.PaymentStatus paymentStatus;
+    private LocalDateTime settledAt;
     private LocalDateTime createdAt;
 }

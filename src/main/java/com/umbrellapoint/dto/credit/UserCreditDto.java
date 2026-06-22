@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
 @Data
@@ -14,5 +15,7 @@ public class UserCreditDto {
     private Long userId;
     private Integer score;
     private Integer overdueCount;
+    private BigDecimal pendingFees;
+    private Integer pendingFeeCount;
     private LocalDateTime updatedAt;
 }

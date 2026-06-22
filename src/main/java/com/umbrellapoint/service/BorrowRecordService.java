@@ -185,6 +185,10 @@ public class BorrowRecordService {
                 record.getReturnTime(),
                 record.getStatus(),
                 record.getDeposit(),
+                record.getCrossRegionFeeId(),
+                record.getIsCrossRegion(),
+                record.getPaymentStatus(),
+                record.getSettledAt(),
                 record.getCreatedAt()
         );
     }

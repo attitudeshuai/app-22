@@ -1,11 +1,14 @@
 package com.umbrellapoint.service;
 
+import com.umbrellapoint.config.CrossRegionFeeConfig;
+import com.umbrellapoint.dto.station.NearbyStationDto;
 import com.umbrellapoint.dto.station.StationDto;
 import com.umbrellapoint.dto.station.StationRequest;
 import com.umbrellapoint.entity.Station;
 import com.umbrellapoint.exception.BusinessException;
 import com.umbrellapoint.exception.ResourceNotFoundException;
 import com.umbrellapoint.repository.StationRepository;
+import com.umbrellapoint.repository.UmbrellaRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.domain.Page;
@@ -16,15 +19,28 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.List;
+import java.util.stream.Collectors;
+
 @Service
 public class StationService {
 
     private static final Logger logger = LoggerFactory.getLogger(StationService.class);
 
     private final StationRepository stationRepository;
+    private final UmbrellaRepository umbrellaRepository;
+    private final CrossRegionFeeConfig feeConfig;
 
-    public StationService(StationRepository stationRepository) {
+    public StationService(StationRepository stationRepository,
+                          UmbrellaRepository umbrellaRepository,
+                          CrossRegionFeeConfig feeConfig) {
         this.stationRepository = stationRepository;
+        this.umbrellaRepository = umbrellaRepository;
+        this.feeConfig = feeConfig;
     }
 
     public Page<StationDto> getAllStations(int page, int size, String search, String sortBy, String sortDir) {
@@ -105,5 +121,61 @@ public class StationService {
                 station.getIsActive(),
                 station.getCreatedAt()
         );
+    }
+
+    public List<NearbyStationDto> findNearbyReturnStations(Station currentStation) {
+        if (currentStation == null || currentStation.getLatitude() == null || currentStation.getLongitude() == null) {
+            return new ArrayList<>();
+        }
+
+        BigDecimal radiusKm = feeConfig.getNearbyStationRadiusKm();
+        Integer limit = feeConfig.getNearbyStationLimit();
+
+        List<Station> allActiveStations = stationRepository.findByIsActive(true, PageRequest.of(0, 1000)).getContent();
+
+        List<NearbyStationDto> nearbyStations = allActiveStations.stream()
+                .filter(s -> !s.getId().equals(currentStation.getId()))
+                .map(s -> {
+                    BigDecimal distance = calculateDistance(currentStation, s);
+                    long currentCount = umbrellaRepository.countByStationId(s.getId());
+                    int availableSlots = s.getCapacity() - (int) currentCount;
+                    NearbyStationDto dto = new NearbyStationDto();
+                    dto.setId(s.getId());
+                    dto.setName(s.getName());
+                    dto.setAddress(s.getAddress());
+                    dto.setLatitude(s.getLatitude());
+                    dto.setLongitude(s.getLongitude());
+                    dto.setDistanceKm(distance);
+                    dto.setAvailableSlots(Math.max(0, availableSlots));
+                    dto.setCapacity(s.getCapacity());
+                    return dto;
+                })
+                .filter(dto -> dto.getDistanceKm().compareTo(radiusKm) <= 0 && dto.getAvailableSlots() > 0)
+                .sorted(Comparator.comparing(NearbyStationDto::getDistanceKm))
+                .limit(limit)
+                .collect(Collectors.toList());
+
+        logger.info("查找附近可归还站点: 源站点={}, 半径={}km, 找到={}个",
+                currentStation.getId(), radiusKm, nearbyStations.size());
+        return nearbyStations;
+    }
+
+    private BigDecimal calculateDistance(Station from, Station to) {
+        if (from.getLatitude() == null || from.getLongitude() == null
+                || to.getLatitude() == null || to.getLongitude() == null) {
+            return BigDecimal.valueOf(99999);
+        }
+        final double R = 6371.0;
+        double lat1 = from.getLatitude().doubleValue();
+        double lon1 = from.getLongitude().doubleValue();
+        double lat2 = to.getLatitude().doubleValue();
+        double lon2 = to.getLongitude().doubleValue();
+        double dLat = Math.toRadians(lat2 - lat1);
+        double dLon = Math.toRadians(lon2 - lon1);
+        double a = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+                + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2))
+                * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+        double c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        return BigDecimal.valueOf(R * c).setScale(2, RoundingMode.HALF_UP);
     }
 }

@@ -1,10 +1,13 @@
 package com.umbrellapoint.service;
 
+import com.umbrellapoint.dto.fee.CrossRegionFeeDto;
 import com.umbrellapoint.dto.qrcode.ScanBorrowRequest;
 import com.umbrellapoint.dto.qrcode.ScanBorrowResponse;
 import com.umbrellapoint.dto.qrcode.ScanReturnRequest;
 import com.umbrellapoint.dto.qrcode.ScanReturnResponse;
+import com.umbrellapoint.dto.station.NearbyStationDto;
 import com.umbrellapoint.entity.BorrowRecord;
+import com.umbrellapoint.entity.CrossRegionFee;
 import com.umbrellapoint.entity.Station;
 import com.umbrellapoint.entity.Umbrella;
 import com.umbrellapoint.exception.BusinessException;
@@ -34,6 +37,8 @@ public class QrCodeService {
     private final AuthService authService;
     private final ReservationService reservationService;
     private final CreditValidationService creditValidationService;
+    private final CrossRegionFeeService crossRegionFeeService;
+    private final StationService stationService;
 
     public QrCodeService(StationRepository stationRepository,
                          UmbrellaRepository umbrellaRepository,
@@ -41,7 +46,9 @@ public class QrCodeService {
                          UserCreditRepository userCreditRepository,
                          AuthService authService,
                          ReservationService reservationService,
-                         CreditValidationService creditValidationService) {
+                         CreditValidationService creditValidationService,
+                         CrossRegionFeeService crossRegionFeeService,
+                         StationService stationService) {
         this.stationRepository = stationRepository;
         this.umbrellaRepository = umbrellaRepository;
         this.borrowRecordRepository = borrowRecordRepository;
@@ -49,6 +56,8 @@ public class QrCodeService {
         this.authService = authService;
         this.reservationService = reservationService;
         this.creditValidationService = creditValidationService;
+        this.crossRegionFeeService = crossRegionFeeService;
+        this.stationService = stationService;
     }
 
     @Transactional
@@ -157,21 +166,15 @@ public class QrCodeService {
             throw new BusinessException(401, "用户未登录");
         }
 
-        Station station = stationRepository.findByQrCode(request.getQrCode())
+        Station returnStation = stationRepository.findByQrCode(request.getQrCode())
                 .orElseThrow(() -> {
                     logger.warn("扫码还伞失败: 无效二维码, qrCode={}, userId={}", request.getQrCode(), currentUserId);
                     return new BusinessException("二维码无效，未识别到对应借还点");
                 });
 
-        if (!Boolean.TRUE.equals(station.getIsActive())) {
-            logger.warn("扫码还伞失败: 站点已停用, stationId={}, userId={}", station.getId(), currentUserId);
+        if (!Boolean.TRUE.equals(returnStation.getIsActive())) {
+            logger.warn("扫码还伞失败: 站点已停用, stationId={}, userId={}", returnStation.getId(), currentUserId);
             throw new BusinessException("该借还点已停用，暂时无法还伞");
-        }
-
-        long currentCount = umbrellaRepository.countByStationId(station.getId());
-        if (currentCount >= station.getCapacity()) {
-            logger.warn("扫码还伞失败: 站点已满, stationId={}, userId={}", station.getId(), currentUserId);
-            throw new BusinessException("该借还点已满，请选择其他借还点还伞");
         }
 
         List<BorrowRecord> ongoingRecords = borrowRecordRepository.findByUserIdAndStatus(
@@ -182,43 +185,108 @@ public class QrCodeService {
         }
 
         BorrowRecord record = ongoingRecords.get(0);
+        Long borrowStationId = record.getBorrowStationId();
+        Station borrowStation = stationRepository.findById(borrowStationId).orElse(null);
+
+        boolean isCrossRegion = crossRegionFeeService.isCrossRegion(borrowStationId, returnStation.getId());
+
+        long currentCount = umbrellaRepository.countByStationId(returnStation.getId());
+        boolean capacityOverflow = currentCount >= returnStation.getCapacity();
+
+        if (capacityOverflow) {
+            List<NearbyStationDto> nearbyStations = stationService.findNearbyReturnStations(returnStation);
+            logger.warn("扫码还伞: 站点容量已满, stationId={}, userId={}, 查找附近站点数={}",
+                    returnStation.getId(), currentUserId, nearbyStations.size());
+
+            ScanReturnResponse response = new ScanReturnResponse();
+            response.setRecordId(record.getId());
+            response.setUmbrellaId(record.getUmbrellaId());
+            Umbrella umbrella = umbrellaRepository.findById(record.getUmbrellaId()).orElse(null);
+            if (umbrella != null) {
+                response.setUmbrellaCode(umbrella.getCode());
+            }
+            response.setBorrowStationId(borrowStationId);
+            response.setBorrowStationName(borrowStation != null ? borrowStation.getName() : null);
+            response.setReturnStationId(returnStation.getId());
+            response.setReturnStationName(returnStation.getName());
+            response.setBorrowTime(record.getBorrowTime());
+            response.setStatus(record.getStatus());
+            response.setDeposit(record.getDeposit());
+            response.setIsCrossRegion(isCrossRegion);
+            response.setCapacityOverflow(true);
+            response.setNearbyStations(nearbyStations);
+            response.setPaymentStatus(record.getPaymentStatus());
+
+            if (isCrossRegion) {
+                BigDecimal distance = crossRegionFeeService.calculateDistanceKm(borrowStation, returnStation);
+                BigDecimal estimatedFee = crossRegionFeeService.calculateFee(distance);
+                CrossRegionFeeDto feeInfo = new CrossRegionFeeDto();
+                feeInfo.setBorrowRecordId(record.getId());
+                feeInfo.setBorrowStationId(borrowStationId);
+                feeInfo.setBorrowStationName(borrowStation != null ? borrowStation.getName() : null);
+                feeInfo.setReturnStationId(returnStation.getId());
+                feeInfo.setReturnStationName(returnStation.getName());
+                feeInfo.setDistanceKm(distance);
+                feeInfo.setFeeAmount(estimatedFee);
+                response.setCrossRegionFee(feeInfo);
+            }
+
+            return response;
+        }
+
         record.setStatus(BorrowRecord.BorrowStatus.Returned);
         record.setReturnTime(LocalDateTime.now());
-        record.setReturnStationId(station.getId());
+        record.setReturnStationId(returnStation.getId());
+        if (!isCrossRegion) {
+            record.setIsCrossRegion(false);
+            record.setPaymentStatus(BorrowRecord.PaymentStatus.None);
+        }
 
         Umbrella umbrella = umbrellaRepository.findById(record.getUmbrellaId()).orElse(null);
         if (umbrella != null) {
             umbrella.setStatus(Umbrella.UmbrellaStatus.Available);
-            umbrella.setStationId(station.getId());
+            umbrella.setStationId(returnStation.getId());
             umbrellaRepository.save(umbrella);
         }
 
         record = borrowRecordRepository.save(record);
 
+        CrossRegionFee crossRegionFee = null;
+        CrossRegionFeeDto feeDto = null;
+        if (isCrossRegion && borrowStation != null) {
+            crossRegionFee = crossRegionFeeService.createCrossRegionFee(record, borrowStation, returnStation);
+            if (crossRegionFee != null) {
+                feeDto = crossRegionFeeService.convertToDto(crossRegionFee);
+            }
+        }
+
         long availableCount = umbrellaRepository.countByStationIdAndStatus(
-                station.getId(), Umbrella.UmbrellaStatus.Available);
-        boolean restockAlert = checkAndNotifyRestock(station, (int) availableCount);
+                returnStation.getId(), Umbrella.UmbrellaStatus.Available);
+        boolean restockAlert = checkAndNotifyRestock(returnStation, (int) availableCount);
 
-        Station borrowStation = stationRepository.findById(record.getBorrowStationId()).orElse(null);
+        logger.info("扫码还伞成功: userId={}, umbrellaId={}, returnStationId={}, recordId={}, isCrossRegion={}",
+                currentUserId, record.getUmbrellaId(), returnStation.getId(), record.getId(), isCrossRegion);
 
-        logger.info("扫码还伞成功: userId={}, umbrellaId={}, returnStationId={}, recordId={}",
-                currentUserId, record.getUmbrellaId(), station.getId(), record.getId());
+        ScanReturnResponse response = new ScanReturnResponse();
+        response.setRecordId(record.getId());
+        response.setUmbrellaId(record.getUmbrellaId());
+        response.setUmbrellaCode(umbrella != null ? umbrella.getCode() : null);
+        response.setBorrowStationId(borrowStationId);
+        response.setBorrowStationName(borrowStation != null ? borrowStation.getName() : null);
+        response.setReturnStationId(returnStation.getId());
+        response.setReturnStationName(returnStation.getName());
+        response.setBorrowTime(record.getBorrowTime());
+        response.setReturnTime(record.getReturnTime());
+        response.setDeposit(record.getDeposit());
+        response.setStatus(record.getStatus());
+        response.setAvailableCount((int) availableCount);
+        response.setRestockAlert(restockAlert);
+        response.setIsCrossRegion(isCrossRegion);
+        response.setCrossRegionFee(feeDto);
+        response.setCapacityOverflow(false);
+        response.setPaymentStatus(record.getPaymentStatus());
 
-        return new ScanReturnResponse(
-                record.getId(),
-                record.getUmbrellaId(),
-                umbrella != null ? umbrella.getCode() : null,
-                record.getBorrowStationId(),
-                borrowStation != null ? borrowStation.getName() : null,
-                station.getId(),
-                station.getName(),
-                record.getBorrowTime(),
-                record.getReturnTime(),
-                record.getDeposit(),
-                record.getStatus(),
-                (int) availableCount,
-                restockAlert
-        );
+        return response;
     }
 
     private boolean checkAndNotifyRestock(Station station, int availableCount) {

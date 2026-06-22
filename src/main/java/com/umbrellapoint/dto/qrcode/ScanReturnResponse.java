@@ -1,5 +1,7 @@
 package com.umbrellapoint.dto.qrcode;
 
+import com.umbrellapoint.dto.fee.CrossRegionFeeDto;
+import com.umbrellapoint.dto.station.NearbyStationDto;
 import com.umbrellapoint.entity.BorrowRecord;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -7,6 +9,7 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Data
 @NoArgsConstructor
@@ -25,4 +28,9 @@ public class ScanReturnResponse {
     private BorrowRecord.BorrowStatus status;
     private Integer availableCount;
     private boolean restockAlert;
+    private Boolean isCrossRegion;
+    private CrossRegionFeeDto crossRegionFee;
+    private Boolean capacityOverflow;
+    private List<NearbyStationDto> nearbyStations;
+    private BorrowRecord.PaymentStatus paymentStatus;
 }

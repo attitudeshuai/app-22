@@ -99,6 +99,8 @@ public class UserCreditService {
                 credit.getUserId(),
                 credit.getScore(),
                 credit.getOverdueCount(),
+                credit.getPendingFees(),
+                credit.getPendingFeeCount(),
                 credit.getUpdatedAt()
         );
     }

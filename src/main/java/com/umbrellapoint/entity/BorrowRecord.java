@@ -40,11 +40,28 @@ public class BorrowRecord {
     @Column(precision = 10, scale = 2)
     private BigDecimal deposit;
 
+    @Column(name = "cross_region_fee_id", unique = true)
+    private Long crossRegionFeeId;
+
+    @Column(name = "is_cross_region")
+    private Boolean isCrossRegion = false;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "payment_status", length = 20)
+    private PaymentStatus paymentStatus = PaymentStatus.None;
+
+    @Column(name = "settled_at")
+    private LocalDateTime settledAt;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
     public enum BorrowStatus {
         Ongoing, Returned, Overdue
+    }
+
+    public enum PaymentStatus {
+        None, Pending, Paid, Refunded
     }
 }
