@@ -32,15 +32,18 @@ public class BorrowRecordService {
     private final UmbrellaRepository umbrellaRepository;
     private final UserCreditRepository userCreditRepository;
     private final AuthService authService;
+    private final CreditValidationService creditValidationService;
 
     public BorrowRecordService(BorrowRecordRepository borrowRecordRepository,
                                UmbrellaRepository umbrellaRepository,
                                UserCreditRepository userCreditRepository,
-                               AuthService authService) {
+                               AuthService authService,
+                               CreditValidationService creditValidationService) {
         this.borrowRecordRepository = borrowRecordRepository;
         this.umbrellaRepository = umbrellaRepository;
         this.userCreditRepository = userCreditRepository;
         this.authService = authService;
+        this.creditValidationService = creditValidationService;
     }
 
     public Page<BorrowRecordDto> getAllBorrowRecords(int page, int size, Long umbrellaId,
@@ -90,6 +93,9 @@ public class BorrowRecordService {
         if (umbrella.getStatus() != Umbrella.UmbrellaStatus.Available) {
             throw new BusinessException("该雨伞当前不可借");
         }
+
+        creditValidationService.validateBorrowPermission(
+                currentUserId, request.getBorrowStationId(), request.getUmbrellaId());
 
         BorrowRecord record = new BorrowRecord();
         record.setUmbrellaId(request.getUmbrellaId());

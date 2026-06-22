@@ -47,6 +47,7 @@ public class OperationLog {
         RESERVATION_EXPIRE,
         RESERVATION_CANCEL,
         UMBRELLA_BORROW,
+        UMBRELLA_BORROW_REJECT,
         UMBRELLA_RETURN,
         UMBRELLA_LOCK,
         UMBRELLA_UNLOCK,

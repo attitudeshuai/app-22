@@ -19,6 +19,7 @@ public interface BorrowRecordRepository extends JpaRepository<BorrowRecord, Long
     long countByStatus(BorrowRecord.BorrowStatus status);
     List<BorrowRecord> findByUserIdAndStatus(Long userId, BorrowRecord.BorrowStatus status);
     long countByBorrowStationIdAndStatus(Long borrowStationId, BorrowRecord.BorrowStatus status);
+    long countByUserIdAndStatus(Long userId, BorrowRecord.BorrowStatus status);
 
     @Query("SELECT DATE(b.borrowTime) as date, COUNT(b) as count FROM BorrowRecord b WHERE b.borrowTime BETWEEN :start AND :end GROUP BY DATE(b.borrowTime)")
     List<Object[]> countByDateRange(LocalDateTime start, LocalDateTime end);

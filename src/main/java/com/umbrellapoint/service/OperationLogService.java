@@ -109,6 +109,12 @@ public class OperationLogService {
                 reservationId, userId, stationId, umbrellaId, null);
     }
 
+    @Transactional
+    public void logUmbrellaBorrowReject(Long userId, Long stationId, Long umbrellaId, String description, String failureReason) {
+        createLog(OperationLog.OperationType.UMBRELLA_BORROW_REJECT, description,
+                null, userId, stationId, umbrellaId, failureReason);
+    }
+
     private OperationLogDto convertToDto(OperationLog log) {
         return new OperationLogDto(
                 log.getId(),

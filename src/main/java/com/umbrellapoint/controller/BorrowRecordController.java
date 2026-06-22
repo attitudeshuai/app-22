@@ -6,6 +6,8 @@ import com.umbrellapoint.dto.borrow.BorrowRecordDto;
 import com.umbrellapoint.dto.borrow.BorrowRecordRequest;
 import com.umbrellapoint.dto.borrow.BorrowStatusRequest;
 import com.umbrellapoint.entity.BorrowRecord;
+import com.umbrellapoint.exception.BusinessException;
+import com.umbrellapoint.service.AuthService;
 import com.umbrellapoint.service.BorrowRecordService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -19,9 +21,11 @@ import org.springframework.web.bind.annotation.*;
 public class BorrowRecordController {
 
     private final BorrowRecordService borrowRecordService;
+    private final AuthService authService;
 
-    public BorrowRecordController(BorrowRecordService borrowRecordService) {
+    public BorrowRecordController(BorrowRecordService borrowRecordService, AuthService authService) {
         this.borrowRecordService = borrowRecordService;
+        this.authService = authService;
     }
 
     @GetMapping
@@ -52,7 +56,12 @@ public class BorrowRecordController {
     @GetMapping("/{id}")
     @Operation(summary = "获取借还记录详情")
     public ResponseEntity<ApiResponse<BorrowRecordDto>> getBorrowRecordById(@PathVariable Long id) {
-        return ResponseEntity.ok(ApiResponse.success(borrowRecordService.getBorrowRecordById(id)));
+        BorrowRecordDto record = borrowRecordService.getBorrowRecordById(id);
+        Long currentUserId = authService.getCurrentUserId();
+        if (currentUserId != null && !record.getUserId().equals(currentUserId)) {
+            throw new BusinessException(403, "无权查看其他用户的借还记录");
+        }
+        return ResponseEntity.ok(ApiResponse.success(record));
     }
 
     @PostMapping

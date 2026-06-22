@@ -7,7 +7,6 @@ import com.umbrellapoint.dto.qrcode.ScanReturnResponse;
 import com.umbrellapoint.entity.BorrowRecord;
 import com.umbrellapoint.entity.Station;
 import com.umbrellapoint.entity.Umbrella;
-import com.umbrellapoint.entity.UserCredit;
 import com.umbrellapoint.exception.BusinessException;
 import com.umbrellapoint.repository.BorrowRecordRepository;
 import com.umbrellapoint.repository.StationRepository;
@@ -26,7 +25,6 @@ import java.util.List;
 public class QrCodeService {
 
     private static final Logger logger = LoggerFactory.getLogger(QrCodeService.class);
-    private static final int MIN_CREDIT_SCORE = 60;
     private static final BigDecimal DEFAULT_DEPOSIT = new BigDecimal("29.90");
 
     private final StationRepository stationRepository;
@@ -35,19 +33,22 @@ public class QrCodeService {
     private final UserCreditRepository userCreditRepository;
     private final AuthService authService;
     private final ReservationService reservationService;
+    private final CreditValidationService creditValidationService;
 
     public QrCodeService(StationRepository stationRepository,
                          UmbrellaRepository umbrellaRepository,
                          BorrowRecordRepository borrowRecordRepository,
                          UserCreditRepository userCreditRepository,
                          AuthService authService,
-                         ReservationService reservationService) {
+                         ReservationService reservationService,
+                         CreditValidationService creditValidationService) {
         this.stationRepository = stationRepository;
         this.umbrellaRepository = umbrellaRepository;
         this.borrowRecordRepository = borrowRecordRepository;
         this.userCreditRepository = userCreditRepository;
         this.authService = authService;
         this.reservationService = reservationService;
+        this.creditValidationService = creditValidationService;
     }
 
     @Transactional
@@ -68,19 +69,7 @@ public class QrCodeService {
             throw new BusinessException("该借还点已停用，暂时无法借伞");
         }
 
-        UserCredit credit = userCreditRepository.findByUserId(currentUserId).orElse(null);
-        if (credit == null || credit.getScore() < MIN_CREDIT_SCORE) {
-            int score = credit != null ? credit.getScore() : 0;
-            logger.warn("扫码借伞失败: 信用分不足, userId={}, score={}, threshold={}", currentUserId, score, MIN_CREDIT_SCORE);
-            throw new BusinessException("信用分不足，最低需要" + MIN_CREDIT_SCORE + "分才能借伞");
-        }
-
-        List<BorrowRecord> ongoingRecords = borrowRecordRepository.findByUserIdAndStatus(
-                currentUserId, BorrowRecord.BorrowStatus.Ongoing);
-        if (!ongoingRecords.isEmpty()) {
-            logger.warn("扫码借伞失败: 用户有进行中的借还记录, userId={}", currentUserId);
-            throw new BusinessException("您有未归还的雨伞，请先归还后再借");
-        }
+        creditValidationService.validateBorrowPermission(currentUserId, station.getId(), null);
 
         com.umbrellapoint.entity.Reservation activeReservation = reservationService
                 .findActiveReservationByUserAndStation(currentUserId, station.getId());

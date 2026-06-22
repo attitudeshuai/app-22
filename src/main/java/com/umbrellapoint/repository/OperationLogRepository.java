@@ -4,6 +4,7 @@ import com.umbrellapoint.entity.OperationLog;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDateTime;
@@ -23,4 +24,10 @@ public interface OperationLogRepository extends JpaRepository<OperationLog, Long
     List<OperationLog> findByCreatedAtBetween(LocalDateTime start, LocalDateTime end);
 
     Page<OperationLog> findByTypeAndStationId(OperationLog.OperationType type, Long stationId, Pageable pageable);
+
+    @Query("SELECT o.userId, COUNT(o) as rejectCount FROM OperationLog o " +
+            "WHERE o.type = :type AND o.createdAt BETWEEN :start AND :end " +
+            "GROUP BY o.userId ORDER BY rejectCount DESC")
+    List<Object[]> countRejectsByUserIdAndDateRange(OperationLog.OperationType type,
+                                                     LocalDateTime start, LocalDateTime end);
 }

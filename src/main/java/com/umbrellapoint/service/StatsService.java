@@ -1,10 +1,13 @@
 package com.umbrellapoint.service;
 
 import com.umbrellapoint.dto.stats.OverviewStats;
+import com.umbrellapoint.dto.stats.RejectUserStat;
 import com.umbrellapoint.dto.stats.TrendStats;
 import com.umbrellapoint.entity.BorrowRecord;
+import com.umbrellapoint.entity.OperationLog;
 import com.umbrellapoint.entity.Umbrella;
 import com.umbrellapoint.repository.BorrowRecordRepository;
+import com.umbrellapoint.repository.OperationLogRepository;
 import com.umbrellapoint.repository.StationRepository;
 import com.umbrellapoint.repository.UmbrellaRepository;
 import com.umbrellapoint.repository.UserRepository;
@@ -22,15 +25,18 @@ public class StatsService {
     private final StationRepository stationRepository;
     private final UmbrellaRepository umbrellaRepository;
     private final BorrowRecordRepository borrowRecordRepository;
+    private final OperationLogRepository operationLogRepository;
 
     public StatsService(UserRepository userRepository,
                         StationRepository stationRepository,
                         UmbrellaRepository umbrellaRepository,
-                        BorrowRecordRepository borrowRecordRepository) {
+                        BorrowRecordRepository borrowRecordRepository,
+                        OperationLogRepository operationLogRepository) {
         this.userRepository = userRepository;
         this.stationRepository = stationRepository;
         this.umbrellaRepository = umbrellaRepository;
         this.borrowRecordRepository = borrowRecordRepository;
+        this.operationLogRepository = operationLogRepository;
     }
 
     public OverviewStats getOverview() {
@@ -87,5 +93,34 @@ public class StatsService {
         stats.setDailyBorrows(dailyBorrows);
         stats.setTotalBorrowsInRange(total);
         return stats;
+    }
+
+    public List<RejectUserStat> getFrequentRejectUsers(String startDate, String endDate, int topN) {
+        DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd");
+        LocalDateTime start = startDate != null
+                ? LocalDate.parse(startDate, formatter).atStartOfDay()
+                : LocalDateTime.now().minusDays(30);
+        LocalDateTime end = endDate != null
+                ? LocalDate.parse(endDate, formatter).atTime(23, 59, 59)
+                : LocalDateTime.now();
+
+        List<Object[]> results = operationLogRepository.countRejectsByUserIdAndDateRange(
+                OperationLog.OperationType.UMBRELLA_BORROW_REJECT, start, end);
+
+        List<RejectUserStat> stats = new ArrayList<>();
+        int limit = Math.min(topN, results.size());
+        for (int i = 0; i < limit; i++) {
+            Object[] row = results.get(i);
+            Long userId = (Long) row[0];
+            Long rejectCount = ((Number) row[1]).longValue();
+            Long anonymizedId = anonymizeUserId(userId);
+            stats.add(new RejectUserStat(anonymizedId, rejectCount));
+        }
+        return stats;
+    }
+
+    private Long anonymizeUserId(Long userId) {
+        if (userId == null) return null;
+        return (long) (userId.hashCode() & 0xfffffffL);
     }
 }

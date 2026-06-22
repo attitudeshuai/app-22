@@ -4,6 +4,8 @@ import com.umbrellapoint.dto.ApiResponse;
 import com.umbrellapoint.dto.PageResponse;
 import com.umbrellapoint.dto.credit.UserCreditDto;
 import com.umbrellapoint.dto.credit.UserCreditRequest;
+import com.umbrellapoint.exception.BusinessException;
+import com.umbrellapoint.service.AuthService;
 import com.umbrellapoint.service.UserCreditService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -17,9 +19,11 @@ import org.springframework.web.bind.annotation.*;
 public class UserCreditController {
 
     private final UserCreditService userCreditService;
+    private final AuthService authService;
 
-    public UserCreditController(UserCreditService userCreditService) {
+    public UserCreditController(UserCreditService userCreditService, AuthService authService) {
         this.userCreditService = userCreditService;
+        this.authService = authService;
     }
 
     @GetMapping
@@ -43,7 +47,12 @@ public class UserCreditController {
     @GetMapping("/{id}")
     @Operation(summary = "获取用户信用详情")
     public ResponseEntity<ApiResponse<UserCreditDto>> getCreditById(@PathVariable Long id) {
-        return ResponseEntity.ok(ApiResponse.success(userCreditService.getCreditById(id)));
+        UserCreditDto credit = userCreditService.getCreditById(id);
+        Long currentUserId = authService.getCurrentUserId();
+        if (currentUserId != null && !credit.getUserId().equals(currentUserId)) {
+            throw new BusinessException(403, "无权查看其他用户的信用信息");
+        }
+        return ResponseEntity.ok(ApiResponse.success(credit));
     }
 
     @PostMapping

@@ -31,8 +31,13 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(BusinessException.class)
     public ResponseEntity<ApiResponse<Object>> handleBusinessException(BusinessException ex) {
         logger.warn("业务异常: {}", ex.getMessage());
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(ApiResponse.error(ex.getCode(), ex.getMessage()));
+        ApiResponse<Object> response;
+        if (ex.getData() != null) {
+            response = new ApiResponse<>(ex.getCode(), ex.getMessage(), ex.getData());
+        } else {
+            response = ApiResponse.error(ex.getCode(), ex.getMessage());
+        }
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(response);
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
