@@ -95,4 +95,14 @@ public class BorrowRecordController {
         borrowRecordService.deleteBorrowRecord(id);
         return ResponseEntity.ok(ApiResponse.success("删除成功", null));
     }
+
+    @PostMapping("/{id}/appeal")
+    @Operation(summary = "提交逾期申诉")
+    public ResponseEntity<ApiResponse<BorrowRecordDto>> submitAppeal(
+            @PathVariable Long id,
+            @RequestParam String reason) {
+        return ResponseEntity.ok(ApiResponse.success(
+                "申诉提交成功",
+                borrowRecordService.submitAppeal(id, reason)));
+    }
 }

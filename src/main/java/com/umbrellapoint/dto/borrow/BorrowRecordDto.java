@@ -25,5 +25,12 @@ public class BorrowRecordDto {
     private Boolean isCrossRegion;
     private BorrowRecord.PaymentStatus paymentStatus;
     private LocalDateTime settledAt;
+    private BorrowRecord.AppealStatus appealStatus;
+    private LocalDateTime appealTime;
+    private String appealReason;
+    private LocalDateTime appealReviewTime;
+    private Long appealReviewerId;
+    private String appealReviewRemark;
+    private Integer totalOverdueDays;
     private LocalDateTime createdAt;
 }

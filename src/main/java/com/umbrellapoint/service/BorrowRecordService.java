@@ -174,6 +174,36 @@ public class BorrowRecordService {
         logger.info("借还记录删除成功: {}", id);
     }
 
+    @Transactional
+    public BorrowRecordDto submitAppeal(Long id, String reason) {
+        BorrowRecord record = borrowRecordRepository.findById(id)
+                .orElseThrow(() -> new ResourceNotFoundException("借还记录", "id", id));
+
+        Long currentUserId = authService.getCurrentUserId();
+        if (currentUserId == null) {
+            throw new BusinessException(401, "用户未登录");
+        }
+        if (!record.getUserId().equals(currentUserId)) {
+            throw new BusinessException(403, "无权对他人的记录提交申诉");
+        }
+
+        if (record.getStatus() != BorrowRecord.BorrowStatus.Overdue) {
+            throw new BusinessException("只有逾期记录才能提交申诉");
+        }
+
+        if (record.getAppealStatus() == BorrowRecord.AppealStatus.Pending) {
+            throw new BusinessException("该记录已有申诉待审核，请勿重复提交");
+        }
+
+        record.setAppealStatus(BorrowRecord.AppealStatus.Pending);
+        record.setAppealTime(LocalDateTime.now());
+        record.setAppealReason(reason);
+        record = borrowRecordRepository.save(record);
+
+        logger.info("用户提交逾期申诉: borrowRecordId={}, userId={}, reason={}", id, currentUserId, reason);
+        return convertToDto(record);
+    }
+
     private BorrowRecordDto convertToDto(BorrowRecord record) {
         return new BorrowRecordDto(
                 record.getId(),
@@ -189,6 +219,13 @@ public class BorrowRecordService {
                 record.getIsCrossRegion(),
                 record.getPaymentStatus(),
                 record.getSettledAt(),
+                record.getAppealStatus(),
+                record.getAppealTime(),
+                record.getAppealReason(),
+                record.getAppealReviewTime(),
+                record.getAppealReviewerId(),
+                record.getAppealReviewRemark(),
+                record.getTotalOverdueDays(),
                 record.getCreatedAt()
         );
     }

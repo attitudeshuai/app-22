@@ -53,6 +53,31 @@ public class BorrowRecord {
     @Column(name = "settled_at")
     private LocalDateTime settledAt;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "appeal_status", length = 20)
+    private AppealStatus appealStatus = AppealStatus.None;
+
+    @Column(name = "appeal_time")
+    private LocalDateTime appealTime;
+
+    @Column(name = "appeal_reason", length = 500)
+    private String appealReason;
+
+    @Column(name = "appeal_review_time")
+    private LocalDateTime appealReviewTime;
+
+    @Column(name = "appeal_reviewer_id")
+    private Long appealReviewerId;
+
+    @Column(name = "appeal_review_remark", length = 500)
+    private String appealReviewRemark;
+
+    @Column(name = "last_penalty_at")
+    private LocalDateTime lastPenaltyAt;
+
+    @Column(name = "total_overdue_days")
+    private Integer totalOverdueDays = 0;
+
     @CreationTimestamp
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
@@ -63,5 +88,9 @@ public class BorrowRecord {
 
     public enum PaymentStatus {
         None, Pending, Paid, Refunded
+    }
+
+    public enum AppealStatus {
+        None, Pending, Approved, Rejected
     }
 }
