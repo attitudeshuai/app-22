@@ -6,11 +6,14 @@ import com.umbrellapoint.exception.ResourceNotFoundException;
 import com.umbrellapoint.repository.OperationLogRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -19,6 +22,10 @@ public class OperationLogService {
     private static final Logger logger = LoggerFactory.getLogger(OperationLogService.class);
 
     private final OperationLogRepository operationLogRepository;
+
+    @Lazy
+    @Autowired
+    private OperationLogService self;
 
     public OperationLogService(OperationLogRepository operationLogRepository) {
         this.operationLogRepository = operationLogRepository;
@@ -48,7 +55,7 @@ public class OperationLogService {
         return convertToDto(log);
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRED)
     public OperationLogDto createLog(OperationLog.OperationType type, String description,
                                      Long relatedId, Long userId, Long stationId, Long umbrellaId,
                                      String failureReason) {
@@ -66,52 +73,62 @@ public class OperationLogService {
         return convertToDto(log);
     }
 
-    @Transactional
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public OperationLogDto createLogRequiresNew(OperationLog.OperationType type, String description,
+                                                Long relatedId, Long userId, Long stationId, Long umbrellaId,
+                                                String failureReason) {
+        OperationLog log = new OperationLog();
+        log.setType(type);
+        log.setDescription(description);
+        log.setRelatedId(relatedId);
+        log.setUserId(userId);
+        log.setStationId(stationId);
+        log.setUmbrellaId(umbrellaId);
+        log.setFailureReason(failureReason);
+        log = operationLogRepository.save(log);
+
+        logger.info("运营日志已记录(独立事务): type={}, description={}", type, description);
+        return convertToDto(log);
+    }
+
     public void logReservationCreate(Long reservationId, Long userId, Long stationId, Long umbrellaId, String description) {
-        createLog(OperationLog.OperationType.RESERVATION_CREATE, description,
+        self.createLog(OperationLog.OperationType.RESERVATION_CREATE, description,
                 reservationId, userId, stationId, umbrellaId, null);
     }
 
-    @Transactional
     public void logReservationComplete(Long reservationId, Long userId, Long stationId, Long umbrellaId, String description) {
-        createLog(OperationLog.OperationType.RESERVATION_COMPLETE, description,
+        self.createLog(OperationLog.OperationType.RESERVATION_COMPLETE, description,
                 reservationId, userId, stationId, umbrellaId, null);
     }
 
-    @Transactional
     public void logReservationExpire(Long reservationId, Long userId, Long stationId, Long umbrellaId,
                                      String description, String failureReason) {
-        createLog(OperationLog.OperationType.RESERVATION_EXPIRE, description,
+        self.createLog(OperationLog.OperationType.RESERVATION_EXPIRE, description,
                 reservationId, userId, stationId, umbrellaId, failureReason);
     }
 
-    @Transactional
     public void logReservationCancel(Long reservationId, Long userId, Long stationId, Long umbrellaId, String description) {
-        createLog(OperationLog.OperationType.RESERVATION_CANCEL, description,
+        self.createLog(OperationLog.OperationType.RESERVATION_CANCEL, description,
                 reservationId, userId, stationId, umbrellaId, null);
     }
 
-    @Transactional
     public void logUmbrellaLock(Long umbrellaId, Long stationId, Long userId, String description) {
-        createLog(OperationLog.OperationType.UMBRELLA_LOCK, description,
+        self.createLog(OperationLog.OperationType.UMBRELLA_LOCK, description,
                 umbrellaId, userId, stationId, umbrellaId, null);
     }
 
-    @Transactional
     public void logUmbrellaUnlock(Long umbrellaId, Long stationId, Long userId, String description) {
-        createLog(OperationLog.OperationType.UMBRELLA_UNLOCK, description,
+        self.createLog(OperationLog.OperationType.UMBRELLA_UNLOCK, description,
                 umbrellaId, userId, stationId, umbrellaId, null);
     }
 
-    @Transactional
     public void logQueueNotify(Long reservationId, Long userId, Long stationId, Long umbrellaId, String description) {
-        createLog(OperationLog.OperationType.QUEUE_NOTIFY, description,
+        self.createLog(OperationLog.OperationType.QUEUE_NOTIFY, description,
                 reservationId, userId, stationId, umbrellaId, null);
     }
 
-    @Transactional
     public void logUmbrellaBorrowReject(Long userId, Long stationId, Long umbrellaId, String description, String failureReason) {
-        createLog(OperationLog.OperationType.UMBRELLA_BORROW_REJECT, description,
+        self.createLogRequiresNew(OperationLog.OperationType.UMBRELLA_BORROW_REJECT, description,
                 null, userId, stationId, umbrellaId, failureReason);
     }
 
